@@ -1,0 +1,15 @@
+[Unit]
+Description=Zigbee Light Systemd service
+
+[Service]
+Type=simple
+User=pi
+Group=raspberry
+ExecStart=python /home/pi/zigbeeEspurna.py
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+TimeoutStopSec=10
+
+[Install]
+WantedBy=multi-user.target
+
