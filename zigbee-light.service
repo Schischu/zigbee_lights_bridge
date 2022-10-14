@@ -1,14 +1,15 @@
 [Unit]
 Description=Zigbee Light Systemd service
+After=network.target
 
 [Service]
 Type=simple
 User=pi
-Group=raspberry
-ExecStart=python /home/pi/zigbeeEspurna.py
+Group=pi
+WorkingDirectory=/home/pi/zigbee_lights_bridge
+ExecStart=python3 /home/pi/zigbee_lights_bridge/zigbeeLights.py
 ExecReload=/bin/kill -HUP $MAINPID
 Restart=on-failure
-TimeoutStopSec=10
 
 [Install]
 WantedBy=multi-user.target
