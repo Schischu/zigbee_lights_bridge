@@ -6,6 +6,31 @@ import json
 import paho.mqtt.client as mqtt
 import asyncio
 import websockets
+import requests
+import math
+
+def rgb_to_hsv(r, g, b):
+    r = float(r)
+    g = float(g)
+    b = float(b)
+    high = max(r, g, b)
+    low = min(r, g, b)
+    h, s, v = high, high, high
+
+    d = high - low
+    s = 0 if high == 0 else d/high
+
+    if high == low:
+        h = 0.0
+    else:
+        h = {
+            r: (g - b) / d + (6 if g < b else 0),
+            g: (b - r) / d + 2,
+            b: (r - g) / d + 4,
+        }[high]
+        h /= 6
+
+    return h, s, v
 
 def configureTTY(tty, baudrate):
   os.system("stty -F " + tty + " igncr")
@@ -37,10 +62,20 @@ def websocketSend(uri, message):
   #print("websocket: ", message)
   asyncio.get_event_loop().run_until_complete(_websocketSend(uri, message))
 
+def httpOpen(name, ip, port):
+  uri = "http://" + ip + ":" + str(port)
+  return uri
+
+def httpSend(uri, url, message):
+  completeUri = uri + url
+  #print("http: ", completeUri, message)
+  requests.put(completeUri, data = message)
+
 class BackendType:
   MQTT      = 0
   WEBSOCKET = 1
-  UNDEFINED = 2
+  HTTP      = 2
+  UNDEFINED = 3
 
 class Backend:
   backendType = BackendType.UNDEFINED
@@ -133,6 +168,40 @@ def main(argv):
 
       backend[iNode].backendHandle = websocketOpen(node["name"], websocketConfiguration["ip"], websocketConfiguration["port"])
 
+    elif "http" in node:
+      backend.append(Backend(BackendType.HTTP))
+
+      httpConfiguration = node["http"]
+
+      if "ip" not in httpConfiguration:
+        httpConfiguration["ip"] = "127.0.0.1"
+
+      if "port" not in httpConfiguration:
+        httpConfiguration["port"] = 16021
+
+      if "switch-url" not in httpConfiguration:
+        httpConfiguration["switch-url"] = ""
+
+      if "switch-on" not in httpConfiguration:
+        httpConfiguration["switch-on"] = ""
+
+      if "switch-off" not in httpConfiguration:
+        httpConfiguration["switch-off"] = ""
+
+      if "brightness-url" not in httpConfiguration:
+        httpConfiguration["brightness-url"] = ""
+
+      if "brightness" not in httpConfiguration:
+        httpConfiguration["brightness"] = ""
+
+      if "hsv-url" not in httpConfiguration:
+        httpConfiguration["hsv-url"] = ""
+
+      if "hsv" not in httpConfiguration:
+        httpConfiguration["hsv"] = ""
+
+      backend[iNode].backendHandle = httpOpen(node["name"], httpConfiguration["ip"], httpConfiguration["port"])
+
     iNode = iNode + 1
 
   print("Opening tty")
@@ -190,6 +259,23 @@ def main(argv):
               cmd = "L"
               line = "0"
 
+        elif backend[index].backendType == BackendType.HTTP:
+          url = nodes[index]["http"]["switch-url"]
+          message = ""
+
+          if value == 1 and "switch-on" in nodes[index]["http"]:
+            message = nodes[index]["http"]["switch-on"]
+
+          if value == 0 and "switch-off" in nodes[index]["http"]:
+            message = nodes[index]["http"]["switch-off"]
+
+          if message != "":
+            httpSend(backend[index].backendHandle, url, message)
+          else:
+            if value == 0:
+              cmd = "L"
+              line = "0"
+
       if cmd == "L":
         value = int(line)
         percent = int(value * 100 / 255)
@@ -209,6 +295,17 @@ def main(argv):
               message = message.replace("<percent>", str(percent))
               websocketSend(backend[index].backendHandle, message)
 
+        elif backend[index].backendType == BackendType.HTTP:
+          if "brightness" in nodes[index]["http"]:
+            url = nodes[index]["http"]["brightness-url"]
+            message = nodes[index]["http"]["brightness"]
+
+            if message != "":
+              message = message.replace("<value>", str(value))
+              message = message.replace("<percent>", str(percent))
+              httpSend(backend[index].backendHandle, url, message)
+
+
         if value > 0:
           if backend[index].backendType == BackendType.MQTT:
             if "switch-on" in nodes[index]["mqtt"]:
@@ -221,6 +318,14 @@ def main(argv):
               message = nodes[index]["websocket"]["switch-on"]
               if message != "":
                 websocketSend(backend[index].backendHandle, message)
+
+          elif False: #backend[index].backendType == BackendType.HTTP:
+            if "switch-on" in nodes[index]["http"]:
+              url = nodes[index]["http"]["switch-url"]
+              message = nodes[index]["http"]["switch-on"]
+
+              if message != "":
+                httpSend(backend[index].backendHandle, url, message)
 
       if cmd == "C":
         color = line.split(" ")
@@ -245,6 +350,20 @@ def main(argv):
               message = message.replace("<green>", str(g))
               message = message.replace("<blue>", str(b))
               websocketSend(backend[index].backendHandle, message)
+
+        elif backend[index].backendType == BackendType.HTTP:
+          if "hsv" in nodes[index]["http"]:
+            message = nodes[index]["http"]["hsv"]
+            if message != "":
+              url = nodes[index]["http"]["hsv-url"]
+
+              h,s,v = rgb_to_hsv(r, g, b)
+              #print("HSV", h, s, v)
+
+              message = message.replace("<hue>", str(int(h*360)))
+              message = message.replace("<sat>", str(int(s*100)))
+              #message = message.replace("<value>", str(v))
+              httpSend(backend[index].backendHandle, url, message)
 
   except KeyboardInterrupt:
     close(tty)
